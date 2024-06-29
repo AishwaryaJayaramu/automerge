@@ -20,8 +20,8 @@ def get_pr_data(repo_name, pr_number):
             'title': pr.title,
             'body': pr.body,
             'state': pr.state,
-            'created_at': pr.created_at,
-            'updated_at': pr.updated_at,
+            # 'created_at': pr.created_at,
+            # 'updated_at': pr.updated_at,
             'base': pr.base.ref,
             'head': pr.head.ref,
             'user': pr.user.login,
@@ -113,7 +113,7 @@ def main():
         print(json.dumps(output_data, indent=2))
 
         # Return the JSON data
-        return output_data
+        return json.dumps(output_data)
     else:
         print(f"Failed to fetch PR data for {args.repo} #{args.pr_number}")
         return None
