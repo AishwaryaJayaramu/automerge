@@ -26,6 +26,5 @@ new_content = '''This is the new content.
 It will replace the old content in the file.'''
 commit_message = 'Automerged commit'
 overwrite_file(file_path, new_content, commit_message)
-save_location = 'automerge/apps/script2.txt'
 
 
