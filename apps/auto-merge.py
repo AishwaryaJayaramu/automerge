@@ -2,57 +2,20 @@ import os
 import sys
 import argparse
 from github import Github
-import difflib
-
-# GitHub authentication
-github_token = os.getenv('GITHUB_TOKEN')
-print(f"Token available: {'Yes' if github_token else 'No'}")
-if not github_token:
-    print("Error: GITHUB_TOKEN environment variable not set.")
-    sys.exit(1)
-
-g = Github(github_token)
-
-def get_file_content(repo, path, ref):
-    try:
-        content = repo.get_contents(path, ref=ref)
-        return content.decoded_content.decode('utf-8')
-    except Exception as e:
-        print(f"Error fetching content for {path} from {ref}: {str(e)}")
-        return None
-
-def get_conflict_content(master_content, pr_content):
-    differ = difflib.Differ()
-    diff = list(differ.compare(master_content.splitlines(), pr_content.splitlines()))
-    conflict_content = []
-    in_conflict = False
-    for line in diff:
-        if line.startswith('- '):
-            if not in_conflict:
-                conflict_content.append("<<<<<<< HEAD")
-                in_conflict = True
-            conflict_content.append(line[2:])
-        elif line.startswith('+ '):
-            if in_conflict:
-                conflict_content.append("=======")
-                in_conflict = False
-            conflict_content.append(line[2:])
-        elif line.startswith('  '):
-            if in_conflict:
-                conflict_content.append("=======")
-                conflict_content.append(">>>>>>> PR")
-                in_conflict = False
-            conflict_content.append(line[2:])
-    if in_conflict:
-        conflict_content.append("=======")
-        conflict_content.append(">>>>>>> PR")
-    return '\n'.join(conflict_content)
+import json
 
 def get_pr_data(repo_name, pr_number):
+    github_token = os.getenv('GITHUB_TOKEN')
+    if not github_token:
+        print("Error: GITHUB_TOKEN environment variable not set.")
+        sys.exit(1)
+
+    g = Github(github_token)
+
     try:
         repo = g.get_repo(repo_name)
         pr = repo.get_pull(pr_number)
-        
+        print(pr_number)
         pr_data = {
             'title': pr.title,
             'body': pr.body,
@@ -68,20 +31,25 @@ def get_pr_data(repo_name, pr_number):
         pr_data['files_changed'] = [file.filename for file in files_changed]
         
         file_contents = {}
-        conflicting_files = []
         for file in files_changed:
-            master_content = get_file_content(repo, file.filename, pr.base.ref)
-            pr_content = get_file_content(repo, file.filename, pr.head.ref)
+            if file.status == 'added':
+                master_content = None
+                pr_content = file.patch
+            elif file.status == 'removed':
+                master_content = repo.get_contents(file.filename, ref=pr.base.ref).decoded_content.decode('utf-8')
+                pr_content = None
+            else:
+                master_content = repo.get_contents(file.filename, ref=pr.base.ref).decoded_content.decode('utf-8')
+                pr_content = repo.get_contents(file.filename, ref=pr.head.sha).decoded_content.decode('utf-8')
+            
             file_contents[file.filename] = {
+                'status': file.status,
                 'master_content': master_content,
-                'pr_content': pr_content
+                'pr_content': pr_content,
+                'patch': file.patch
             }
-            if master_content != pr_content:
-                conflicting_files.append(file.filename)
-                file_contents[file.filename]['conflict_content'] = get_conflict_content(master_content, pr_content)
         
         pr_data['file_contents'] = file_contents
-        pr_data['conflicting_files'] = conflicting_files
         
         return pr_data
     
@@ -97,27 +65,58 @@ def main():
 
     pr_data = get_pr_data(args.repo, args.pr_number)
     if pr_data:
-        print(f"PR Data for {args.repo} #{args.pr_number}:")
-        for key, value in pr_data.items():
-            if key not in ['file_contents', 'conflicting_files']:
-                print(f"{key}: {value}")
-        
-        print("\nConflicting files:")
-        print(pr_data['conflicting_files'])
-        
-        print("\nFile contents:")
+        output_data = {
+            "conflicting_files": [],
+            "master_files": [],
+            "pr_files": [],
+            "added_files": [],
+            "deleted_files": []
+        }
+
         for filename, contents in pr_data['file_contents'].items():
-            print(f"\n{filename}:")
-            if filename in pr_data['conflicting_files']:
-                print("Conflict content:")
-                print(contents['conflict_content'])
-            else:
-                print("Master branch content:")
-                print(contents['master_content'][:500] + "..." if contents['master_content'] and len(contents['master_content']) > 500 else contents['master_content'])
-                print("\nPR branch content:")
-                print(contents['pr_content'][:500] + "..." if contents['pr_content'] and len(contents['pr_content']) > 500 else contents['pr_content'])
+            file_path = f"/{args.repo}/blob/main/{filename}"  # Assuming main branch
+            
+            if contents['status'] == 'modified':
+                if contents['master_content'] != contents['pr_content']:
+                    output_data["conflicting_files"].append({
+                        "path": file_path,
+                        "content": contents['patch']
+                    })
+                output_data["master_files"].append({
+                    "path": file_path,
+                    "content": contents['master_content']
+                })
+                output_data["pr_files"].append({
+                    "path": file_path,
+                    "content": contents['pr_content']
+                })
+            elif contents['status'] == 'added':
+                output_data["added_files"].append({
+                    "path": file_path,
+                    "content": contents['patch']
+                })
+                output_data["pr_files"].append({
+                    "path": file_path,
+                    "content": contents['pr_content']
+                })
+            elif contents['status'] == 'removed':
+                output_data["deleted_files"].append({
+                    "path": file_path,
+                    "content": contents['master_content']
+                })
+                output_data["master_files"].append({
+                    "path": file_path,
+                    "content": contents['master_content']
+                })
+
+        # Print the JSON data
+        print(json.dumps(output_data, indent=2))
+
+        # Return the JSON data
+        return output_data
     else:
         print(f"Failed to fetch PR data for {args.repo} #{args.pr_number}")
+        return None
 
 if __name__ == "__main__":
     main()
