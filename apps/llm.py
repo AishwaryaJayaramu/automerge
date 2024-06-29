@@ -10,6 +10,7 @@ from octoai.client import OctoAI
 from octoai.text_gen import ChatMessage
 from fetchpr import get_pr_data
 import json
+from pr_updater import update_pr
 from pydantic import BaseModel, Field
 from typing import List
 
@@ -89,7 +90,7 @@ class Output(BaseModel):
     
 
 def generate_test_content():
-    return get_pr_data("bhargav265/takenote", 1)
+    return get_pr_data("bhargav265/takenote", 5)
     
 content = str(generate_test_content())
 # print(content)
@@ -102,7 +103,8 @@ completion = client.text_gen.create_chat_completion(
         ),
         ChatMessage(role="user", content=content),
     ],
-    max_tokens=500,
+    max_tokens=2000,
+    temperature=0,
     response_format=ChatCompletionResponseFormat(
         type="json_object",
         schema=Output.model_json_schema(),
@@ -111,3 +113,5 @@ completion = client.text_gen.create_chat_completion(
 
 print(json.loads(completion.choices[0].message.content))
 
+
+update_pr("bhargav265/takenote", 5, completion.choices[0].message.content)
