@@ -1,0 +1,2 @@
+This is the new content.
+It will replace the old content in the file.
